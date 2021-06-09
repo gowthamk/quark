@@ -139,11 +139,17 @@ pred fork[t,t': Time] {
 }
 
 /*
+ * v1 ->* v2
+ */
+pred ancestor_of[v1,v2: Version, t:Time] {
+    let edges = System.edges.t.Action |
+    v2 in v1.*edges
+}
+/*
  * v1 ->* v2 or v2 ->* v1
  */
 pred ancestrally_related[v1,v2: Version, t: Time] {
-    let edges = System.edges.t.Action |
-    v2 in v1.*edges or v1 in v2.*edges
+    ancestor_of[v1,v2,t] or ancestor_of[v2,v1,t]
 }
 
 pred fastfwd[t,t' : Time] {
@@ -156,21 +162,28 @@ pred fastfwd[t,t' : Time] {
     some b2: (System.branches.t - b1) |
     let hd1 = b1.head.t |
     let hd2 = b2.head.t |
-    let lb1b2 = b2.(b1.lca).t {
-        /* hd1 is L(b1,b2). */
+    let lb1b2 = b2.(b1.lca).t |
+    let new_tups = (b1 -> b2 -> hd2) + (b1 -> b1 -> v) +
+    {b1:b1, b:(System.branches.t - (b1 + b2)), v':b.(b2.lca).t | 
+    ancestor_of[b.(b1.lca).t, b.(b2.lca.t), t]} {
+        /* hd1 must be = L(b1,b2). */
         hd1 = lb1b2
-        /* hd2 is ahead of L(b1,b2) */
+        /* hd2 must be ahead of L(b1,b2) */
         some (hd2.commits - lb1b2.commits)
-        all b: System.branches.t | 
-            ancestrally_related[b2.(b.lca).t, lb1b2, t]
+        all b: (System.branches.t - (b1 + b2)) | 
+            ancestrally_related[b.(b1.lca).t, b.(b2.lca).t, t]
         v.createdAt = t'
         v.commits = hd2.commits
         v.value = hd2.value
         v.branch = b1
         b1.mem.t' = b1.mem.t + v
         b1.head.t' = v
-        b2.(b1.lca).t' = hd2
-        
+        some new_tups
+        update_lca[t,t',new_tups]
+        all b:(System.branches.t - b1) | skip[t,t',b]
+        System.vertices.t' = System.vertices.t + v
+        System.edges.t' = System.edges.t + hd1->v->FastFwd + hd2->v->FastFwd
+        System.branches.t' = System.branches.t
     }
 }
 
@@ -178,11 +191,11 @@ fact traces {
     init [first]
     all t: Time - last |
         let t' = t.next |
-            commit[t,t'] or fork[t,t']
+            commit[t,t'] or fork[t,t'] or fastfwd[t,t']
 }
 
 pred example {
-
+    some v1,v2:Version | v1 -> v2 -> FastFwd in System.edges.last 
 }
 
-run example for 3 but exactly 3 Branch
+run example for 4 //but exactly 3 Branch
