@@ -6,7 +6,13 @@ sig Commit {}
 
 //one sig InitCommit extends Commit {}
 
-sig Value {}
+sig Value {
+    merge_fn: Value -> Value/*LCA*/ -> Value
+}
+
+fact MergeIsTotal {
+    all v1,v2,l: Value | one l.(v2.(v1.merge_fn))
+}
 
 abstract sig Action {}
 one sig NewCommit, Fork, FastFwd, Merge extends Action {}
@@ -187,15 +193,52 @@ pred fastfwd[t,t' : Time] {
     }
 }
 
+pred merge[t,t' : Time] {
+    let vrsns = System.vertices.t |
+    some v: (Version - vrsns) |
+    /*
+     * Merging b2 into b1
+     */
+    some b1: System.branches.t |
+    some b2: (System.branches.t - b1) |
+    let hd1 = b1.head.t |
+    let hd2 = b2.head.t |
+    let lb1b2 = b2.(b1.lca).t |
+    let val1 = hd1.value |
+    let val2 = hd2.value |
+    let lca_val = lb1b2.value |
+    let new_tups = (b1 -> b2 -> hd2) + (b1 -> b1 -> v) +
+    {b1:b1, b:(System.branches.t - (b1 + b2)), v':b.(b2.lca).t | 
+    ancestor_of[b.(b1.lca).t, b.(b2.lca.t), t]} {
+        /* hd1 and hd2 must be ahead of L(b1,b2) */
+        some (hd1.commits - lb1b2.commits)
+        some (hd2.commits - lb1b2.commits)
+        all b: (System.branches.t - (b1 + b2)) | 
+            ancestrally_related[b.(b1.lca).t, b.(b2.lca).t, t]
+        v.createdAt = t'
+        v.commits = hd1.commits + hd2.commits
+        v.value = lca_val.(val2.(val1.merge_fn))
+        v.branch = b1
+        b1.mem.t' = b1.mem.t + v
+        b1.head.t' = v
+        some new_tups
+        update_lca[t,t',new_tups]
+        all b:(System.branches.t - b1) | skip[t,t',b]
+        System.vertices.t' = System.vertices.t + v
+        System.edges.t' = System.edges.t + hd1->v->Merge + hd2->v->Merge
+        System.branches.t' = System.branches.t
+    }
+}
+
 fact traces {
     init [first]
     all t: Time - last |
         let t' = t.next |
-            commit[t,t'] or fork[t,t'] or fastfwd[t,t']
+            commit[t,t'] or fork[t,t'] or fastfwd[t,t'] or merge[t,t']
 }
 
 pred example {
-    some v1,v2:Version | v1 -> v2 -> FastFwd in System.edges.last 
+    some v1,v2:Version | v1 -> v2 -> Merge in System.edges.last 
 }
 
-run example for 4 //but exactly 3 Branch
+run example for 5 //but exactly 3 Branch
