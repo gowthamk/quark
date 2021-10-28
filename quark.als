@@ -172,8 +172,8 @@ pred fastfwd[t,t' : Time] {
     let new_tups = (b1 -> b2 -> hd2) + (b1 -> b1 -> v) +
     {b1:b1, b:(System.branches.t - (b1 + b2)), v':b.(b2.lca).t | 
     ancestor_of[b.(b1.lca).t, b.(b2.lca.t), t]} {
-        /* hd1 must be = L(b1,b2). */
-        hd1 = lb1b2
+        /* hd1 must be same or a fork of L(b1,b2). */
+        hd1.commits = lb1b2.commits
         /* hd2 must be ahead of L(b1,b2) */
         some (hd2.commits - lb1b2.commits)
         all b: (System.branches.t - (b1 + b2)) | 
@@ -237,8 +237,75 @@ fact traces {
             commit[t,t'] or fork[t,t'] or fastfwd[t,t'] or merge[t,t']
 }
 
+/*
+ * Checking convergence
+ */ 
+assert convergence {
+    all t: Time | all v1,v2: System.vertices.t | 
+        v1.commits = v2.commits => v1.value = v2.value
+}
+
+/* No violation */
+check convergence for 7 but 4 Branch
+
+/*
+ * Checking progress
+ */
+pred quiescent_state[t: Time] {
+    all b1,b2: System.branches.t | b1.head.t.commits = b2.head.t.commits
+}
+
+pred exists_mergeable[t: Time] {
+    some b1: System.branches.t |
+    some b2: (System.branches.t - b1) |
+    let hd1 = b1.head.t |
+    let hd2 = b2.head.t |
+    let lb1b2 = b2.(b1.lca).t {
+        /* Either hd1 is L(b1,b2) or hd1 and hd2 are ahead of L(b1,b2) */
+        hd1.commits = lb1b2.commits or some (hd1.commits - lb1b2.commits)
+        some (hd2.commits - lb1b2.commits)
+        all b: (System.branches.t - (b1 + b2)) | 
+            ancestrally_related[b.(b1.lca).t, b.(b2.lca).t, t]
+    }
+}
+
+assert progress {
+    all t: Time | quiescent_state[t] or exists_mergeable[t]
+}
+
+check progress for 7 but 4 Branch
+
+/*
+ * Sample executions
+ */
 pred example {
     some v1,v2:Version | v1 -> v2 -> Merge in System.edges.last 
 }
 
-run example for 5 //but exactly 3 Branch
+
+pred convergent_example {
+    all b1,b2: System.branches.last | b1.head.last.commits = b2.head.last.commits
+    some disj b1,b2,b3,b4: System.branches.last | 
+        some disj v1,v2,v4,v5,v7,v8,v10,v11: Version |
+            v1.branch = b1 && v2.branch = b1 && //v3.branch = b1 &&
+            v4.branch = b2 && v5.branch = b2 && //v6.branch = b2 &&
+            v7.branch = b3 && v8.branch = b3 && //v9.branch = b3 &&
+            v10.branch = b4 && v11.branch = b4 //&& v12.branch = b4
+}
+
+run convergent_example for 8 but exactly 4 Branch, 4 Commit
+
+pred convergent_example2 {
+    all b1,b2: System.branches.last | b1.head.last.commits = b2.head.last.commits
+    some disj b1,b2,b3: System.branches.last | 
+        some disj v1,v2,v4,v5,v7,v8: Version |
+            v1.branch = b1 && v2.branch = b1 && //v3.branch = b1 &&
+            v4.branch = b2 && v5.branch = b2 && //v6.branch = b2 &&
+            v7.branch = b3 && v8.branch = b3 //&& //v9.branch = b3 &&
+            //v10.branch = b4 && v11.branch = b4 //&& v12.branch = b4
+    all v1,v2:Version | all a: Action | 
+        v1 -> v2 -> a in System.edges.last => a != FastFwd
+}
+
+run convergent_example2 for 7 but exactly 3 Branch, exactly 3 Commit
+
